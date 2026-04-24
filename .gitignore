@@ -1,0 +1,15 @@
+# Database
+data/
+backups/
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Security
+*.pem
+*.pub
+
+# Env
+.env
+.env.local

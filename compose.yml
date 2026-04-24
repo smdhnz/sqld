@@ -1,0 +1,52 @@
+services:
+  sqld:
+    image: ghcr.io/tursodatabase/libsql-server:latest
+    user: "${PUID}:${PGID}"
+    entrypoint: ["docker-entrypoint.sh"]
+    command: ["/bin/sqld"]
+    ports:
+      - "8080:8080"
+    environment:
+      - SQLD_NODE=${SQLD_NODE:-primary}
+      - SQLD_AUTH_JWT_KEY_FILE=/var/lib/sqld/auth_public.pem
+    volumes:
+      - ./data:/var/lib/sqld
+    restart: always
+
+  backup:
+    build:
+      context: .
+      dockerfile: docker/backup.Dockerfile
+      args:
+        - PUID=${PUID:-1000}
+        - PGID=${PGID:-1000}
+    user: "${PUID}:${PGID}"
+    restart: always
+    stop_grace_period: 1s
+    depends_on:
+      - sqld
+    environment:
+      - BACKUP_INTERVAL_SECONDS=${BACKUP_INTERVAL_SECONDS:-86400}
+      - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-7}
+    volumes:
+      - ./data:/var/lib/sqld:ro
+      - ./backups:/backups
+
+  tunnel:
+    build:
+      context: .
+      dockerfile: docker/tunnel.Dockerfile
+      args:
+        - PUID=${PUID:-1000}
+        - PGID=${PGID:-1000}
+    user: "${PUID}:${PGID}"
+    restart: always
+    depends_on:
+      - sqld
+    volumes:
+      - ~/.ssh:/ssh-keys:ro
+    command: >
+      -o StrictHostKeyChecking=no
+      -i /ssh-keys/${SSH_SECRET_KEY_FILENAME}
+      -R ${SUBDOMAIN}:80:sqld:8080
+      ${TCPEXPOSER_USERNAME}@tcpexposer.com
