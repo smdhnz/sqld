@@ -20,6 +20,7 @@ services:
       args:
         - PUID=${PUID:-1000}
         - PGID=${PGID:-1000}
+    image: sqld-backup
     user: "${PUID}:${PGID}"
     restart: always
     stop_grace_period: 1s
@@ -39,6 +40,7 @@ services:
       args:
         - PUID=${PUID:-1000}
         - PGID=${PGID:-1000}
+    image: tcpexposer
     user: "${PUID}:${PGID}"
     restart: always
     depends_on:
