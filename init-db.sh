@@ -17,7 +17,7 @@ echo "Directories 'data' and 'backups' are ready."
 CONFIG_FILE="config.json"
 if [ ! -f "$CONFIG_FILE" ]; then
 	echo "2. Initializing config.json..."
-	echo "{\"databases\": {\"$DB_NAME\": {\"expose\": true}}}" >"$CONFIG_FILE"
+	jq -n --arg db "$DB_NAME" '{"databases": {($db): {"expose": true}}}' >"$CONFIG_FILE"
 	echo "Initialized $CONFIG_FILE with $DB_NAME (exposed: true)."
 else
 	echo "2. config.json already exists. Skipping initialization."
@@ -28,6 +28,8 @@ DB_DIR="data/${DB_NAME}"
 mkdir -p "$DB_DIR"
 
 echo "3. Generating Ed25519 key pair for ${DB_NAME}..."
+touch "${DB_DIR}/auth_private.pem"
+chmod 600 "${DB_DIR}/auth_private.pem"
 openssl genpkey -algorithm ed25519 -out "${DB_DIR}/auth_private.pem"
 openssl pkey -in "${DB_DIR}/auth_private.pem" -pubout -out "${DB_DIR}/auth_public.pem"
 echo "Keys generated successfully in ${DB_DIR}."
@@ -37,9 +39,10 @@ echo "4. Generating JWT token (EdDSA) for ${DB_NAME}..."
 HEADER=$(echo -n '{"alg":"EdDSA","typ":"JWT"}' | openssl base64 -e | tr -d '\n=' | tr '+/' '-_')
 PAYLOAD=$(echo -n '{}' | openssl base64 -e | tr -d '\n=' | tr '+/' '-_')
 
-echo -n "${HEADER}.${PAYLOAD}" >.jwt_input
-SIGNATURE=$(openssl pkeyutl -sign -inkey "${DB_DIR}/auth_private.pem" -rawin -in .jwt_input | openssl base64 -e | tr -d '\n=' | tr '+/' '-_')
-rm .jwt_input
+JWT_INPUT_TEMP=".jwt_input.$$"
+echo -n "${HEADER}.${PAYLOAD}" >"$JWT_INPUT_TEMP"
+SIGNATURE=$(openssl pkeyutl -sign -inkey "${DB_DIR}/auth_private.pem" -rawin -in "$JWT_INPUT_TEMP" | openssl base64 -e | tr -d '\n=' | tr '+/' '-_')
+rm "$JWT_INPUT_TEMP"
 
 TOKEN="${HEADER}.${PAYLOAD}.${SIGNATURE}"
 

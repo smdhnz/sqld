@@ -13,6 +13,13 @@ services:
       - ./data:/var/lib/sqld
       - ./config.json:/var/lib/sqld/config.json:ro
     restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+        reservations:
+          memory: 128M
 
   backup:
     build:
@@ -31,6 +38,11 @@ services:
       - ./data:/var/lib/sqld:ro
       - ./config.json:/var/lib/sqld/config.json:ro
       - ./backups:/backups
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
 
   tunnel:
     build:
@@ -47,7 +59,12 @@ services:
       - SUBDOMAIN=${SUBDOMAIN}
       - TCPEXPOSER_USERNAME=${TCPEXPOSER_USERNAME}
     volumes:
-      - ~/.ssh:/ssh-keys:ro
+      - ~/.ssh/${SSH_SECRET_KEY_FILENAME}:/ssh-keys/${SSH_SECRET_KEY_FILENAME}:ro
+    deploy:
+      resources:
+        limits:
+          cpus: '0.10'
+          memory: 128M
     command: >
       -o StrictHostKeyChecking=no
       -i /ssh-keys/${SSH_SECRET_KEY_FILENAME}
