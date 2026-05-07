@@ -26,7 +26,7 @@ exec su-exec $USER_ID:$GROUP_ID sh -c '
       DB_NAMES=$(jq -r ".databases | keys[]" "$CONFIG_FILE")
       
       for DB_NAME in $DB_NAMES; do
-        DB_FILE="/var/lib/sqld/${DB_NAME}/dbs/default/data"
+        DB_FILE="/var/lib/sqld/${DB_NAME}/data"
         TARGET_DIR="${BACKUP_DIR}/${DB_NAME}"
         mkdir -p "$TARGET_DIR"
         BACKUP_FILE="${TARGET_DIR}/backup_${TIMESTAMP}.db"
