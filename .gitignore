@@ -1,6 +1,7 @@
 # Database
 data/
 backups/
+config.json
 *.db
 *.db-journal
 *.db-shm
@@ -13,3 +14,4 @@ backups/
 # Env
 .env
 .env.local
+.jwt_input

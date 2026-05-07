@@ -1,54 +1,55 @@
 services:
-  sqld:
-    image: ghcr.io/tursodatabase/libsql-server:latest
-    user: "${PUID}:${PGID}"
-    entrypoint: ["docker-entrypoint.sh"]
-    command: ["/bin/sqld"]
-    ports:
-      - "8080:8080"
+  dbs:
+    build:
+      context: ./docker/router
+      dockerfile: Dockerfile
     environment:
       - SQLD_NODE=${SQLD_NODE:-primary}
-      - SQLD_AUTH_JWT_KEY_FILE=/var/lib/sqld/auth_public.pem
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+    ports:
+      - "8080:8080"
     volumes:
       - ./data:/var/lib/sqld
+      - ./config.json:/var/lib/sqld/config.json:ro
     restart: always
 
   backup:
     build:
-      context: .
-      dockerfile: docker/backup.Dockerfile
-      args:
-        - PUID=${PUID:-1000}
-        - PGID=${PGID:-1000}
-    image: sqld-backup
-    user: "${PUID}:${PGID}"
+      context: ./docker/backup
+      dockerfile: Dockerfile
     restart: always
     stop_grace_period: 1s
     depends_on:
-      - sqld
+      - dbs
     environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
       - BACKUP_INTERVAL_SECONDS=${BACKUP_INTERVAL_SECONDS:-86400}
       - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-7}
     volumes:
       - ./data:/var/lib/sqld:ro
+      - ./config.json:/var/lib/sqld/config.json:ro
       - ./backups:/backups
 
   tunnel:
     build:
-      context: .
-      dockerfile: docker/tunnel.Dockerfile
-      args:
-        - PUID=${PUID:-1000}
-        - PGID=${PGID:-1000}
+      context: ./docker/tunnel
+      dockerfile: Dockerfile
     image: tcpexposer
-    user: "${PUID}:${PGID}"
     restart: always
     depends_on:
-      - sqld
+      - dbs
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - SSH_SECRET_KEY_FILENAME=${SSH_SECRET_KEY_FILENAME}
+      - SUBDOMAIN=${SUBDOMAIN}
+      - TCPEXPOSER_USERNAME=${TCPEXPOSER_USERNAME}
     volumes:
       - ~/.ssh:/ssh-keys:ro
     command: >
       -o StrictHostKeyChecking=no
       -i /ssh-keys/${SSH_SECRET_KEY_FILENAME}
-      -R ${SUBDOMAIN}:80:sqld:8080
+      -R ${SUBDOMAIN}:80:dbs:8081
       ${TCPEXPOSER_USERNAME}@tcpexposer.com

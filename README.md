@@ -1,85 +1,116 @@
-# 自宅 SQLite エッジサーバー (libSQL/sqld)
+# sqld Multi-Database Edge Server (Production Ready)
 
-Vercel 等の外部サービスから、自宅サーバーの SQLite (libSQL) を利用するための構成一式です。
-libSQL 互換のクライアントであれば利用可能ですが、ここでは例として Drizzle ORM での設定方法を記載します。
-セキュリティ、バックアップ、トンネル（tcpexposer）を統合しています。
+本プロジェクトは、[libSQL (sqld)](https://github.com/tursodatabase/libsql) を使用した、本格的な運用向けのマルチデータベース・エッジサーバー構成です。フロントに **Bun** を採用した高性能な非同期ルーターを配し、単一のポートで複数の SQLite データベースを動的にルーティング・管理します。
 
-## 1. 事前準備
+## 🌟 主な特徴
 
-```bash
-# 必要なディレクトリを作成
-mkdir -p data backups
+- **マルチデータベース対応**: `config.json` で定義するだけで、複数の独立したデータベースを即座に追加・運用可能。
+- **高性能 Bun プロキシ**: Node.js 22 互換の最新ランタイム **Bun** を採用。非ブロッキング I/O により、低メモリかつ高スループットなルーティングを実現。
+- **セキュアな設計**: 全コンテナで `su-exec` / `gosu` を使用。コンテナプロセスをホストの UID/GID と一致する non-root ユーザーで実行し、セキュリティとファイル権限の整合性を両立。
+- **高速な終了**: 終了シグナル（SIGTERM）を子プロセスへ即座に転送するルーター設計により、`docker compose down` 時の待機時間を解消。
+- **堅牢なバックアップ**: 起動時に全 DB の即時バックアップを実行し、その後設定された間隔で世代管理バックアップを自動継続。
+- **自動ブートストラップ**: `init-db.sh` により、フォルダ作成、設定初期化、Ed25519 鍵ペア生成が 1 コマンドで完結。
+
+## 🏗 ディレクトリ構造
+
+```text
+.
+├── config.json         # データベース定義（Git管理対象外）
+├── compose.yml         # サービス定義
+├── init-db.sh          # 初期セットアップ・認証キー生成スクリプト
+├── data/               # データベース実体（Git管理対象外・DBごとにフォルダ分割）
+├── backups/            # バックアップファイル（Git管理対象外）
+└── docker/             # サービスごとのDockerfile
+    ├── router/         # Bunルーター（dbsサービス）
+    ├── backup/         # バックアップサービス
+    └── tunnel/         # トンネルサービス（tcpexposer）
 ```
 
-## 2. セキュリティ設定 (JWT 認証) ※必須
+## 🚀 クイックスタート
 
-本構成ではセキュリティのため、**トークン認証が必須**となっています。以下のスクリプトを実行して、鍵ペアの作成と認証用トークンの発行を一度に行います。
+### 1. 事前準備
 
-```bash
-# 実行権限を付与して実行
-chmod +x setup-auth.sh
-./setup-auth.sh
-```
-
-実行後、表示されたトークンを `.env` の `DATABASE_AUTH_TOKEN` に設定してください。
-公開鍵は `data/auth_public.pem` として保存され、これがないとサーバーは起動しません。
-
-## 3. 設定 (.env)
-
-`.env.example` をコピーして、環境に合わせた設定を行います。
+`.env.example` をコピーして `.env` を作成します（トンネルを使用しない場合はデフォルトのままでも動作します）。
 
 ```bash
 cp .env.example .env
 ```
 
-`.env` 内の各項目を設定してください：
+### 2. 初期セットアップ (自動ブートストラップ)
 
-- `PUID`, `PGID`: ホストのユーザーIDとグループID（`id -u`, `id -g` で確認可能）。
-- `SSH_SECRET_KEY_FILENAME`: `~/.ssh` 内の秘密鍵ファイル名（例: `id_ed25519`）。
-- `SUBDOMAIN`: tcpexposer で使用するサブドメイン名。
-- `TCPEXPOSER_USERNAME`: tcpexposer のユーザー名。
-
-## 4. 起動
+以下のコマンドを実行して、最初のデータベース（例: `db1`）を作成します。
 
 ```bash
-# イメージのビルド
-docker compose build --no-cache
-
-# 起動
-docker compose up -d
+chmod +x init-db.sh
+./init-db.sh db1
 ```
 
-## 5. クライアントからの接続例 (Drizzle ORM)
+この操作により、以下の処理が自動的に行われます：
+1.  `data` および `backups` フォルダの作成。
+2.  **`config.json` の自動生成**（すでに存在する場合はスキップ）。
+3.  指定したデータベース専用の認証キー（Ed25519）の生成と JWT の発行。
 
-環境変数に以下を設定します（`${DB_SUBDOMAIN}` は `.env` ファイルで設定した実際の値に置き換えてください）：
+### 3. 設定の確認・カスタマイズ
 
-- `DATABASE_URL`: `https://${DB_SUBDOMAIN}.tcpexposer.com`
-- `DATABASE_AUTH_TOKEN`: (手順2で生成したトークン)
+生成された `config.json` を開き、データベースの定義を確認します。
 
-```typescript
-// db.ts (Example)
-import { drizzle } from "drizzle-orm/libsql";
-import { createClient } from "@libsql/client";
+```json
+{
+  "databases": {
+    "db1": {
+      "expose": true
+    }
+  }
+}
+```
+- `expose`: `true` に設定すると、トンネル経由で外部からアクセス可能になります。
 
-const client = createClient({
-  url: process.env.DATABASE_URL!,
-  authToken: process.env.DATABASE_AUTH_TOKEN,
-});
-export const db = drizzle(client);
+### 4. 起動
+
+```bash
+docker compose up -d --build
 ```
 
-## 6. 運用・バックアップ
+## ⚙️ 運用・管理
 
-- **自動バックアップ**: 指定した間隔（デフォルト 24時間）ごとに `./backups` へ保存されます（`.env` の `BACKUP_INTERVAL_SECONDS` で設定）。
-- **手動バックアップ**: `docker exec sqld-backup /usr/local/bin/backup.sh`
-- **リストア**:
-  1. `docker compose stop sqld`
-  2. `cp backups/backup_XXX.db data/dbs/default/data`
-  3. `docker compose start sqld`
-- **GUI操作**: ローカル PC から `npx drizzle-kit studio` を実行したり、[libSQL Studio](https://libsqlstudio.com/) を利用したりするのが最適です。
+### データベースの管理
 
-## 技術仕様
+- **追加**: `config.json` に DB 名を追記し、`./init-db.sh <DB名>` を実行後、`docker compose restart dbs` で反映。
+- **公開制御**: `config.json` の `expose: true/false` でトンネル経由の外部露出を個別に制御。
+- **リセット**: 特定の DB を初期化する場合、`docker compose stop dbs` してから `data/<DB名>/dbs` フォルダを削除し、再起動します。
 
-- **汎用性**: libSQL 互換のあらゆるクライアント（Python, Rust, Go, Node.js 等）から接続可能。
-- **Immutable & Minimal**: バックアップスクリプトはすべて Docker イメージ内に埋め込まれており、ホスト側を汚しません。
-- **設定の集約**: ポート、サブドメイン、バックアップスケジュール、認証設定はすべて `.env` で管理します。
+### リストア（復元）の手順
+
+1.  安全のため、対象のコンテナを停止します： `docker compose stop dbs`
+2.  バックアップファイルをデータディレクトリに上書きコピーします：
+    ```bash
+    cp backups/db1/backup_YYYYMMDD_HHMMSS.db data/db1/dbs/default/data
+    ```
+3.  パーミッションが正しい（PUID/PGIDと一致している）ことを確認します。
+4.  コンテナを再起動します： `docker compose start dbs`
+
+### 接続URLと認証 (SDK/Drizzle 等)
+
+Drizzle ORM や libSQL SDK から接続する場合は、以下の **Base URL** を使用します。
+
+- **Local Access**: `http://localhost:8080/{db_name}/`
+- **Tunnel Access**: `https://{your-subdomain}.tcpexposer.com/{db_name}/`
+- **Auth Token**: `./init-db.sh` で発行されたトークンを使用。
+
+### 動作確認 (curl)
+
+直接 API を叩く場合は、エンドポイントまで指定します。
+
+```bash
+curl -s -X POST http://localhost:8080/db1/v1/execute \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{"stmt": {"sql": "SELECT 1;"}}' | jq .
+```
+
+## 📝 技術スタック
+
+- **Core**: libSQL (sqld)
+- **Runtime**: Bun 1.1+ (Router/Manager)
+- **Security**: Ed25519 JWT Auth, gosu/su-exec privilege dropping
+- **Size**: Optimized multi-stage build (~370MB)
