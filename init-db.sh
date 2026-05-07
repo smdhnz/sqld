@@ -13,14 +13,18 @@ echo "1. Bootstrapping directories..."
 mkdir -p data backups
 echo "Directories 'data' and 'backups' are ready."
 
-# 2. Initialize config.json if not exists
+# 2. Initialize or update config.json
 CONFIG_FILE="config.json"
 if [ ! -f "$CONFIG_FILE" ]; then
 	echo "2. Initializing config.json..."
 	jq -n --arg db "$DB_NAME" '{"databases": {($db): {"expose": true}}}' >"$CONFIG_FILE"
 	echo "Initialized $CONFIG_FILE with $DB_NAME (exposed: true)."
 else
-	echo "2. config.json already exists. Skipping initialization."
+	echo "2. Updating config.json with ${DB_NAME}..."
+	# Append the new database to the existing object
+	TMP_FILE="config.json.$$.tmp"
+	jq --arg db "$DB_NAME" '.databases[($db)] = {"expose": true}' "$CONFIG_FILE" > "$TMP_FILE" && mv "$TMP_FILE" "$CONFIG_FILE"
+	echo "Added $DB_NAME to $CONFIG_FILE."
 fi
 
 # 3. Generate keys for the specific DB
