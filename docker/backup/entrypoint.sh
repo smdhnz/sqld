@@ -13,7 +13,7 @@ echo "Starting Backup service (UID: $USER_ID, GID: $GROUP_ID)"
 # 実際のバックアップ処理を行うループ
 # su-exec を使って一般ユーザーとして実行
 exec su-exec $USER_ID:$GROUP_ID sh -c '
-  CONFIG_FILE="/var/lib/sqld/config.json"
+  CONFIG_FILE="/etc/sqld/config.json"
   BACKUP_DIR="/backups"
   
   while true; do

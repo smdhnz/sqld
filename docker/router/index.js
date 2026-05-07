@@ -3,7 +3,7 @@ const { spawn } = require('child_process');
 const http = require('http');
 const httpProxy = require('http-proxy');
 
-const CONFIG_PATH = '/var/lib/sqld/config.json';
+const CONFIG_PATH = '/etc/sqld/config.json';
 
 if (!fs.existsSync(CONFIG_PATH)) {
     console.error(`Config file not found at ${CONFIG_PATH}`);
