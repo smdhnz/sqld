@@ -112,5 +112,6 @@ curl -s -X POST http://localhost:8080/db1/v1/execute \
 
 - **Core**: libSQL (sqld)
 - **Runtime**: Bun 1.1+ (Router/Manager)
-- **Security**: Ed25519 JWT Auth, gosu/su-exec privilege dropping, Resource Limits
-- **Size**: Optimized multi-stage build (~370MB)
+- **Security**: Ed25519 JWT Auth, Docker native `user` mapping, Resource Limits
+- **Size**: Optimized multi-stage build & .dockerignore
+ulti-stage build (~370MB)

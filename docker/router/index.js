@@ -101,6 +101,15 @@ const shutdown = async (signal) => {
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+    console.error('Uncaught Exception thrown:', err);
+    shutdown('SIGINT');
+});
+
 const handleRequest = (req, res, isTunnel) => {
     // Add security headers
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -135,9 +144,21 @@ const handleRequest = (req, res, isTunnel) => {
     proxy.web(req, res, { target: `http://127.0.0.1:${db.port}` });
 };
 
-// Port 8080: Local access (all DBs)
-http.createServer((req, res) => handleRequest(req, res, false)).listen(8080, () => {
-    console.log('Router listening on port 8080 (Local Access)');
+// Port 8080: Local access (all DBs) + Health Check
+http.createServer((req, res) => {
+    if (req.url === '/health') {
+        const alive = children.filter(c => c.process.exitCode === null);
+        if (alive.length > 0) {
+            res.writeHead(200);
+            return res.end('OK');
+        } else {
+            res.writeHead(503);
+            return res.end('No DBs running');
+        }
+    }
+    handleRequest(req, res, false);
+}).listen(8080, () => {
+    console.log('Router listening on port 8080 (Local Access + /health)');
 });
 
 // Port 8081: Tunnel access (exposed DBs only)

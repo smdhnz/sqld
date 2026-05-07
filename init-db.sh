@@ -23,7 +23,7 @@ else
 	echo "2. Updating config.json with ${DB_NAME}..."
 	# Append the new database to the existing object
 	TMP_FILE="config.json.$$.tmp"
-	jq --arg db "$DB_NAME" '.databases[($db)] = {"expose": true}' "$CONFIG_FILE" > "$TMP_FILE" && mv "$TMP_FILE" "$CONFIG_FILE"
+	jq --arg db "$DB_NAME" '.databases[($db)] = {"expose": true}' "$CONFIG_FILE" >"$TMP_FILE" && mv "$TMP_FILE" "$CONFIG_FILE"
 	echo "Added $DB_NAME to $CONFIG_FILE."
 fi
 
