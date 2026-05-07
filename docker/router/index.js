@@ -41,7 +41,8 @@ for (const [dbName, dbConfig] of Object.entries(config.databases)) {
 
     const args = [
         '--db-path', dbPath,
-        '--http-listen-addr', `127.0.0.1:${port}`
+        '--http-listen-addr', `127.0.0.1:${port}`,
+        '--no-welcome'
     ];
 
     if (fs.existsSync(keyPath)) {
@@ -51,18 +52,49 @@ for (const [dbName, dbConfig] of Object.entries(config.databases)) {
         console.log(`[${dbName}] Starting on port ${port} WITHOUT JWT auth (key not found at ${keyPath})`);
     }
 
-    const sqld = spawn('/bin/sqld', args, { stdio: 'inherit' });
-    children.push(sqld);
+    const sqld = spawn('/bin/sqld', args);
+    children.push({ process: sqld, dbName });
     
+    // Prefix logs
+    const prefixLog = (data, isError = false) => {
+        const stream = isError ? process.stderr : process.stdout;
+        const lines = data.toString().split('\n');
+        lines.forEach((line, i) => {
+            if (i === lines.length - 1 && line === '') return;
+            stream.write(`[${dbName}] ${line}\n`);
+        });
+    };
+
+    sqld.stdout.on('data', (data) => prefixLog(data));
+    sqld.stderr.on('data', (data) => prefixLog(data, true));
+
     sqld.on('exit', (code) => {
-        console.error(`[${dbName}] sqld process exited with code ${code}`);
+        console.log(`[${dbName}] sqld process exited with code ${code}`);
     });
 }
 
-// Forward signals to child processes for fast shutdown
-const shutdown = (signal) => {
+// Forward signals to child processes and wait for them to exit
+const shutdown = async (signal) => {
     console.log(`Received ${signal}, shutting down children...`);
-    children.forEach(child => child.kill(signal));
+    
+    const exitPromises = children.map(({ process: child, dbName }) => {
+        return new Promise((resolve) => {
+            child.on('exit', () => {
+                console.log(`[${dbName}] cleanup complete.`);
+                resolve();
+            });
+            child.kill(signal);
+        });
+    });
+
+    // Set a timeout for safety
+    const timeout = new Promise((resolve) => setTimeout(() => {
+        console.warn('Shutdown timed out, forcing exit.');
+        resolve();
+    }, 10000));
+
+    await Promise.race([Promise.all(exitPromises), timeout]);
+    console.log('Shutdown complete.');
     process.exit(0);
 };
 
