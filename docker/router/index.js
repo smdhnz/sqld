@@ -1,7 +1,6 @@
 const fs = require('fs');
 const { spawn } = require('child_process');
 const http = require('http');
-const httpProxy = require('http-proxy');
 
 const CONFIG_PATH = '/etc/sqld/config.json';
 
@@ -11,16 +10,6 @@ if (!fs.existsSync(CONFIG_PATH)) {
 }
 
 const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-const proxy = httpProxy.createProxyServer({});
-
-// プロキシエラーを処理してクラッシュを防止
-proxy.on('error', (err, req, res) => {
-    console.error('Proxy error:', err);
-    if (!res.headersSent) {
-        res.writeHead(502, { 'Content-Type': 'text/plain' });
-    }
-    res.end('Bad Gateway');
-});
 
 let nextPort = 9000;
 const dbs = {};
@@ -55,7 +44,6 @@ for (const [dbName, dbConfig] of Object.entries(config.databases)) {
     const sqld = spawn('/bin/sqld', args);
     children.push({ process: sqld, dbName });
     
-    // ログにプレフィックスを付与
     const prefixLog = (data, isError = false) => {
         const stream = isError ? process.stderr : process.stdout;
         const lines = data.toString().split('\n');
@@ -73,51 +61,20 @@ for (const [dbName, dbConfig] of Object.entries(config.databases)) {
     });
 }
 
-// 子プロセスにシグナルを転送し、終了を待機
 const shutdown = async (signal) => {
     console.log(`${signal} を受信しました。子プロセスを終了しています...`);
-    
-    const exitPromises = children.map(({ process: child, dbName }) => {
-        return new Promise((resolve) => {
-            child.on('exit', () => {
-                console.log(`[${dbName}] クリーンアップ完了`);
-                resolve();
-            });
-            child.kill(signal);
-        });
-    });
-
-    // 安全のためタイムアウトを設定
-    const timeout = new Promise((resolve) => setTimeout(() => {
-        console.warn('シャットダウンがタイムアウトしました。強制終了します。');
-        resolve();
-    }, 10000));
-
-    await Promise.race([Promise.all(exitPromises), timeout]);
-    console.log('シャットダウン完了');
+    for (const { process: child, dbName } of children) {
+        child.kill(signal);
+    }
     process.exit(0);
 };
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-});
-
-process.on('uncaughtException', (err) => {
-    console.error('Uncaught Exception thrown:', err);
-    shutdown('SIGINT');
-});
-
 const handleRequest = (req, res, isTunnel) => {
-    // セキュリティヘッダーを追加
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('X-XSS-Protection', '1; mode=block');
-
     // パスから DB 名を抽出: /dbName/rest...
-    const url = new URL(req.url, `http://${req.headers.host}`);
+    const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     const parts = url.pathname.split('/').filter(Boolean);
     
     if (parts.length === 0) {
@@ -138,30 +95,73 @@ const handleRequest = (req, res, isTunnel) => {
         return res.end(`Database "${dbName}" is not exposed via tunnel`);
     }
 
-    // URLを書き換え: /dbName プレフィックスを削除
-    req.url = '/' + parts.slice(1).join('/') + url.search;
+    // セキュリティヘッダー
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
 
-    proxy.web(req, res, { target: `http://127.0.0.1:${db.port}` });
+    // バックエンドへのパスを構築
+    const backendPath = '/' + parts.slice(1).join('/') + url.search;
+
+    // リクエストボディをバッファリング
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => {
+        const payload = Buffer.concat(chunks);
+        
+        const options = {
+            hostname: '127.0.0.1',
+            port: db.port,
+            path: backendPath,
+            method: req.method,
+            headers: { ...req.headers }
+        };
+
+        // チャンク転送を固定長に書き換える（Vercel対応の核心）
+        if (payload.length > 0) {
+            options.headers['content-length'] = payload.length;
+            delete options.headers['transfer-encoding'];
+        }
+        
+        // Host ヘッダーをバックエンドに合わせる
+        options.headers['host'] = `127.0.0.1:${db.port}`;
+        
+        // Hop-by-hop ヘッダーを削除（安定性のため）
+        delete options.headers['connection'];
+        delete options.headers['keep-alive'];
+
+        const proxyReq = http.request(options, (proxyRes) => {
+            res.writeHead(proxyRes.statusCode, proxyRes.headers);
+            proxyRes.pipe(res);
+        });
+
+        proxyReq.on('error', (err) => {
+            console.error(`[${dbName}] Proxy error:`, err);
+            if (!res.headersSent) res.writeHead(502);
+            res.end('Bad Gateway');
+        });
+
+        if (payload.length > 0) {
+            proxyReq.write(payload);
+        }
+        proxyReq.end();
+    });
 };
 
 // ポート 8080: ローカルアクセス (全DB) + ヘルスチェック
 http.createServer((req, res) => {
     if (req.url === '/health') {
         const alive = children.filter(c => c.process.exitCode === null);
-        if (alive.length > 0) {
-            res.writeHead(200);
-            return res.end('OK');
-        } else {
-            res.writeHead(503);
-            return res.end('No DBs running');
-        }
+        res.writeHead(alive.length > 0 ? 200 : 503);
+        return res.end(alive.length > 0 ? 'OK' : 'No DBs running');
     }
     handleRequest(req, res, false);
 }).listen(8080, () => {
-    console.log('ルーターがポート 8080 で待機中 (ローカルアクセス + /health)');
+    console.log('ルーターがポート 8080 で待機中 (ローカルアクセス)');
 });
 
-// ポート 8081: トンネルアクセス (公開対象のDBのみ)
+// ポート 8081: トンネルアクセス
 http.createServer((req, res) => handleRequest(req, res, true)).listen(8081, () => {
     console.log('ルーターがポート 8081 で待機中 (トンネルアクセス)');
 });
+
