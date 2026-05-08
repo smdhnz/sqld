@@ -4,42 +4,42 @@ set -e
 DB_NAME=$1
 
 if [ -z "$DB_NAME" ]; then
-	echo "Usage: ./setup-auth.sh <database_name>"
+	echo "使い方: ./init-db.sh <database_name>"
 	exit 1
 fi
 
-# 1. Bootstrap directories
-echo "1. Bootstrapping directories..."
+# 1. ディレクトリの作成
+echo "1. ディレクトリを作成しています..."
 mkdir -p data backups
-echo "Directories 'data' and 'backups' are ready."
+echo "'data' と 'backups' ディレクトリの準備が完了しました。"
 
-# 2. Initialize or update config.json
+# 2. config.json の初期化または更新
 CONFIG_FILE="config.json"
 if [ ! -f "$CONFIG_FILE" ]; then
-	echo "2. Initializing config.json..."
+	echo "2. config.json を初期化しています..."
 	jq -n --arg db "$DB_NAME" '{"databases": {($db): {"expose": true}}}' >"$CONFIG_FILE"
-	echo "Initialized $CONFIG_FILE with $DB_NAME (exposed: true)."
+	echo "$CONFIG_FILE を $DB_NAME で初期化しました (expose: true)。"
 else
-	echo "2. Updating config.json with ${DB_NAME}..."
-	# Append the new database to the existing object
+	echo "2. config.json を ${DB_NAME} で更新しています..."
+	# 既存のオブジェクトに新しいデータベースを追加
 	TMP_FILE="config.json.$$.tmp"
 	jq --arg db "$DB_NAME" '.databases[($db)] = {"expose": true}' "$CONFIG_FILE" >"$TMP_FILE" && mv "$TMP_FILE" "$CONFIG_FILE"
-	echo "Added $DB_NAME to $CONFIG_FILE."
+	echo "$CONFIG_FILE に $DB_NAME を追加しました。"
 fi
 
-# 3. Generate keys for the specific DB
+# 3. 指定されたDB用のキーを生成
 DB_DIR="data/${DB_NAME}"
 mkdir -p "$DB_DIR"
 
-echo "3. Generating Ed25519 key pair for ${DB_NAME}..."
+echo "3. ${DB_NAME} 用の Ed25519 キーペアを生成しています..."
 touch "${DB_DIR}/auth_private.pem"
 chmod 600 "${DB_DIR}/auth_private.pem"
 openssl genpkey -algorithm ed25519 -out "${DB_DIR}/auth_private.pem"
 openssl pkey -in "${DB_DIR}/auth_private.pem" -pubout -out "${DB_DIR}/auth_public.pem"
-echo "Keys generated successfully in ${DB_DIR}."
+echo "${DB_DIR} にキーが正常に生成されました。"
 
-# 4. Generate JWT token
-echo "4. Generating JWT token (EdDSA) for ${DB_NAME}..."
+# 4. JWTトークンの生成
+echo "4. ${DB_NAME} 用の JWTトークン (EdDSA) を生成しています..."
 HEADER=$(echo -n '{"alg":"EdDSA","typ":"JWT"}' | openssl base64 -e | tr -d '\n=' | tr '+/' '-_')
 PAYLOAD=$(echo -n '{}' | openssl base64 -e | tr -d '\n=' | tr '+/' '-_')
 
@@ -51,10 +51,10 @@ rm "$JWT_INPUT_TEMP"
 TOKEN="${HEADER}.${PAYLOAD}.${SIGNATURE}"
 
 echo "--------------------------------------------------"
-echo "SETUP COMPLETE FOR DATABASE: ${DB_NAME}"
+echo "データベースのセットアップが完了しました: ${DB_NAME}"
 echo ""
-echo "DATABASE_AUTH_TOKEN:"
+echo "データベース認証トークン (DATABASE_AUTH_TOKEN):"
 echo "${TOKEN}"
 echo ""
-echo "Connection URL: https://${SUBDOMAIN:-your-subdomain}.tcpexposer.com/${DB_NAME}/"
+echo "接続URL: https://${SUBDOMAIN:-your-subdomain}.tcpexposer.com/${DB_NAME}/"
 echo "--------------------------------------------------"

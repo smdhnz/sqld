@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-echo "Starting Tunnel service..."
+echo "トンネルサービスを起動しています..."
 
 # SSHコマンドを実行
 # compose.yml の command 引数が "$@" として渡される

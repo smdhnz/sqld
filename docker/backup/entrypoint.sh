@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-echo "Starting Backup service..."
+echo "バックアップサービスを起動しています..."
 
 CONFIG_FILE="/etc/sqld/config.json"
 BACKUP_DIR="/backups"
@@ -21,11 +21,11 @@ while true; do
       mkdir -p "$TARGET_DIR"
       BACKUP_FILE="${TARGET_DIR}/backup_${TIMESTAMP}.db"
       
-      echo "Starting backup for ${DB_NAME} at $(date)"
+      echo "${DB_NAME} のバックアップを開始します (${TIMESTAMP})"
       if [ -f "$DB_FILE" ]; then
           # sqlite3 の VACUUM INTO コマンドを実行
           sqlite3 "$DB_FILE" "VACUUM INTO '$BACKUP_FILE'"
-          echo "Backup completed: $BACKUP_FILE"
+          echo "バックアップが完了しました: $BACKUP_FILE"
           
           # 古いバックアップの削除
           find "${TARGET_DIR}" -name "backup_*.db" -mtime +"${BACKUP_RETENTION_DAYS:-7}" -exec rm {} \;
@@ -33,9 +33,9 @@ while true; do
           echo "Warning: Database file not found at $DB_FILE (skipping)"
       fi
     done
-    echo "Backup cycle completed at $(date)"
+    echo "バックアップサイクルが完了しました ($(date))"
   fi
 
-  echo "Sleeping for ${BACKUP_INTERVAL_SECONDS:-86400} seconds..."
+  echo "${BACKUP_INTERVAL_SECONDS:-86400} 秒間待機します..."
   sleep "${BACKUP_INTERVAL_SECONDS:-86400}"
 done

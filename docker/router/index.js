@@ -13,7 +13,7 @@ if (!fs.existsSync(CONFIG_PATH)) {
 const config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
 const proxy = httpProxy.createProxyServer({});
 
-// Handle proxy errors to prevent crash
+// プロキシエラーを処理してクラッシュを防止
 proxy.on('error', (err, req, res) => {
     console.error('Proxy error:', err);
     if (!res.headersSent) {
@@ -26,7 +26,7 @@ let nextPort = 9000;
 const dbs = {};
 const children = [];
 
-console.log('Starting sqld instances...');
+console.log('sqld インスタンスを起動しています...');
 
 for (const [dbName, dbConfig] of Object.entries(config.databases)) {
     const port = nextPort++;
@@ -47,15 +47,15 @@ for (const [dbName, dbConfig] of Object.entries(config.databases)) {
 
     if (fs.existsSync(keyPath)) {
         args.push('--auth-jwt-key-file', keyPath);
-        console.log(`[${dbName}] Starting on port ${port} with JWT auth`);
+        console.log(`[${dbName}] ポート ${port} で JWT 認証を有効にして起動中`);
     } else {
-        console.log(`[${dbName}] Starting on port ${port} WITHOUT JWT auth (key not found at ${keyPath})`);
+        console.log(`[${dbName}] ポート ${port} で JWT 認証なしで起動中 (キーが見つかりません: ${keyPath})`);
     }
 
     const sqld = spawn('/bin/sqld', args);
     children.push({ process: sqld, dbName });
     
-    // Prefix logs
+    // ログにプレフィックスを付与
     const prefixLog = (data, isError = false) => {
         const stream = isError ? process.stderr : process.stdout;
         const lines = data.toString().split('\n');
@@ -69,32 +69,32 @@ for (const [dbName, dbConfig] of Object.entries(config.databases)) {
     sqld.stderr.on('data', (data) => prefixLog(data, true));
 
     sqld.on('exit', (code) => {
-        console.log(`[${dbName}] sqld process exited with code ${code}`);
+        console.log(`[${dbName}] sqld プロセスが終了しました (終了コード: ${code})`);
     });
 }
 
-// Forward signals to child processes and wait for them to exit
+// 子プロセスにシグナルを転送し、終了を待機
 const shutdown = async (signal) => {
-    console.log(`Received ${signal}, shutting down children...`);
+    console.log(`${signal} を受信しました。子プロセスを終了しています...`);
     
     const exitPromises = children.map(({ process: child, dbName }) => {
         return new Promise((resolve) => {
             child.on('exit', () => {
-                console.log(`[${dbName}] cleanup complete.`);
+                console.log(`[${dbName}] クリーンアップ完了`);
                 resolve();
             });
             child.kill(signal);
         });
     });
 
-    // Set a timeout for safety
+    // 安全のためタイムアウトを設定
     const timeout = new Promise((resolve) => setTimeout(() => {
-        console.warn('Shutdown timed out, forcing exit.');
+        console.warn('シャットダウンがタイムアウトしました。強制終了します。');
         resolve();
     }, 10000));
 
     await Promise.race([Promise.all(exitPromises), timeout]);
-    console.log('Shutdown complete.');
+    console.log('シャットダウン完了');
     process.exit(0);
 };
 
@@ -111,12 +111,12 @@ process.on('uncaughtException', (err) => {
 });
 
 const handleRequest = (req, res, isTunnel) => {
-    // Add security headers
+    // セキュリティヘッダーを追加
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('X-XSS-Protection', '1; mode=block');
 
-    // Extract DB name from path: /dbName/rest...
+    // パスから DB 名を抽出: /dbName/rest...
     const url = new URL(req.url, `http://${req.headers.host}`);
     const parts = url.pathname.split('/').filter(Boolean);
     
@@ -138,13 +138,13 @@ const handleRequest = (req, res, isTunnel) => {
         return res.end(`Database "${dbName}" is not exposed via tunnel`);
     }
 
-    // Rewrite URL: strip the /dbName prefix
+    // URLを書き換え: /dbName プレフィックスを削除
     req.url = '/' + parts.slice(1).join('/') + url.search;
 
     proxy.web(req, res, { target: `http://127.0.0.1:${db.port}` });
 };
 
-// Port 8080: Local access (all DBs) + Health Check
+// ポート 8080: ローカルアクセス (全DB) + ヘルスチェック
 http.createServer((req, res) => {
     if (req.url === '/health') {
         const alive = children.filter(c => c.process.exitCode === null);
@@ -158,10 +158,10 @@ http.createServer((req, res) => {
     }
     handleRequest(req, res, false);
 }).listen(8080, () => {
-    console.log('Router listening on port 8080 (Local Access + /health)');
+    console.log('ルーターがポート 8080 で待機中 (ローカルアクセス + /health)');
 });
 
-// Port 8081: Tunnel access (exposed DBs only)
+// ポート 8081: トンネルアクセス (公開対象のDBのみ)
 http.createServer((req, res) => handleRequest(req, res, true)).listen(8081, () => {
-    console.log('Router listening on port 8081 (Tunnel Access)');
+    console.log('ルーターがポート 8081 で待機中 (トンネルアクセス)');
 });
